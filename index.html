@@ -1744,11 +1744,6 @@ function updateHomeStats(){
   update();setInterval(update,1000);
 })();
 
-// Note: Admin dashboard currently reads from the lsGet fallback for quick rendering.
-// If you want it to fetch directly from Supabase, you would write a fetch function like:
-// const { data } = await supabaseClient.from('registrations').select('*');
-// For now, the lsPush fallback keeps your entire existing dashboard code perfectly functional.
-
 function adminLogin(){
   const pass=document.getElementById('admin-pass').value;
   const stored=lsGet('admin-password')||'aranyak2027';
@@ -1772,32 +1767,219 @@ function adminLogout(){
   toast('Logged out','info');
 }
 
-function loadAdminDashboard(){
+async function loadAdminDashboard(){
   const session=lsGet('admin-session');
   if(session&&(Date.now()-session)<3600000){
     document.getElementById('admin-login-screen').style.display='none';
     document.getElementById('admin-dashboard').style.display='block';
   }
-  renderAdminStats(); renderRegTable(); renderVolTable(); renderSponTable(); renderEventsBreakdown();
+
+  // ☁️ FETCH LIVE DATA FROM SUPABASE
+  if (supabaseClient) {
+    document.getElementById('admin-stats-row').innerHTML = '<div style="color:var(--teal); padding:1rem; font-weight:bold;">Fetching live data from cloud database... ⏳</div>';
+    
+    const { data: regData } = await supabaseClient.from('registrations').select('*');
+    if (regData) lsSet('registrations', regData);
+
+    const { data: volData } = await supabaseClient.from('volunteers').select('*');
+    if (volData) lsSet('volunteers', volData);
+
+    const { data: sponData } = await supabaseClient.from('sponsors').select('*');
+    if (sponData) lsSet('sponsors', sponData);
+  }
+
+  renderAdminStats(); 
+  renderRegTable(); 
+  renderVolTable(); 
+  renderSponTable(); 
+  renderEventsBreakdown();
+  
   const status=lsGet('reg-status')||'open';
   document.querySelectorAll('input[name="regstatus"]').forEach(r=>{r.checked=r.value===status;if(r.checked)r.closest('.radio-item')?.classList.add('selected');else r.closest('.radio-item')?.classList.remove('selected')});
 }
 
-function renderAdminStats(){ /* Same as original */ }
-function renderRegTable(){ /* Same as original */ }
-function renderVolTable(){ /* Same as original */ }
-function renderSponTable(){ /* Same as original */ }
-function renderEventsBreakdown(){ /* Same as original */ }
-function deleteEntry(type,id){ /* Same as original */ }
-function clearAllData(type){ /* Same as original */ }
-function nukeAllData(){ /* Same as original */ }
-function filterTable(inputId,tbodyId){ /* Same as original */ }
-function switchAdminTab(id,btn){ /* Same as original */ }
-function changePassword(){ /* Same as original */ }
-function setRegStatus(status){ /* Same as original */ }
-function exportCSV(){ /* Same as original */ }
+function renderAdminStats(){
+  const regs=lsGet('registrations')||[];
+  const vols=lsGet('volunteers')||[];
+  const spons=lsGet('sponsors')||[];
+  const colleges=[...new Set(regs.map(r=>r.college))];
+  const totalEvents=regs.reduce((a,r)=>a+(r.events?r.events.length:0),0);
+  const budgets=lsGet('budgets')||[];
+  const latestBudget=budgets.length?budgets[budgets.length-1]:null;
+  const budgetAmt=latestBudget?'₹'+(latestBudget.total+latestBudget.contingency).toLocaleString('en-IN'):'Not set';
+  
+  document.getElementById('admin-stats-row').innerHTML=`
+    <div class="stat-widget"><div class="sw-num">${regs.length}</div><div class="sw-label">Total Registrations</div></div>
+    <div class="stat-widget" style="--stripe-color:var(--teal)"><div class="sw-num">${vols.length}</div><div class="sw-label">Volunteers Applied</div></div>
+    <div class="stat-widget"><div class="sw-num">${spons.length}</div><div class="sw-label">Sponsor Inquiries</div></div>
+    <div class="stat-widget"><div class="sw-num">${colleges.length}</div><div class="sw-label">Colleges Represented</div></div>
+    <div class="stat-widget"><div class="sw-num">${totalEvents}</div><div class="sw-label">Event Entries Total</div></div>
+    <div class="stat-widget"><div class="sw-num" style="font-size:1.6rem">${budgetAmt}</div><div class="sw-label">Latest Budget Plan</div></div>`;
+}
 
-/* Budget logic preserved */
+function renderRegTable(){
+  const regs=lsGet('registrations')||[];
+  const tbody=document.getElementById('reg-table-body');
+  if(!regs.length){tbody.innerHTML=`<tr><td colspan="10"><div class="empty"><span class="e-icon">🎟</span>No registrations yet.</div></td></tr>`;return}
+  tbody.innerHTML=regs.slice().reverse().map(r=>`
+    <tr data-search="${(r.name+r.email+r.college+r.id).toLowerCase()}">
+      <td><span class="mono">${r.id}</span></td>
+      <td style="font-weight:700">${r.name}</td>
+      <td>${r.college}</td>
+      <td style="font-size:0.75rem">${r.dept}</td>
+      <td>${r.year}</td>
+      <td style="font-size:0.78rem">${r.email}</td>
+      <td class="mono">${r.phone}</td>
+      <td style="max-width:180px">${(r.events||[]).slice(0,3).map(e=>`<span class="badge badge-tech">${e}</span>`).join(' ')}${(r.events||[]).length>3?`<span style="font-size:0.7rem;color:var(--muted)"> +${r.events.length-3} more</span>`:''}</td>
+      <td class="mono">${new Date(r.timestamp).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</td>
+      <td><button class="btn btn-danger" style="padding:0.2rem 0.6rem;font-size:0.72rem" onclick="deleteEntry('registrations','${r.id}')">🗑</button></td>
+    </tr>`).join('');
+}
+
+function renderVolTable(){
+  const vols=lsGet('volunteers')||[];
+  const tbody=document.getElementById('vol-table-body');
+  if(!vols.length){tbody.innerHTML=`<tr><td colspan="10"><div class="empty"><span class="e-icon">🙋</span>No volunteer applications yet.</div></td></tr>`;return}
+  tbody.innerHTML=vols.slice().reverse().map(v=>`
+    <tr>
+      <td style="font-weight:700">${v.name}</td>
+      <td style="font-size:0.78rem">${v.email}</td>
+      <td class="mono">${v.phone}</td>
+      <td style="font-size:0.75rem">${v.dept}</td>
+      <td>${v.year}</td>
+      <td style="max-width:160px">${(v.roles||[]).slice(0,2).map(r=>`<span class="badge badge-vol">${r}</span>`).join(' ')}${(v.roles||[]).length>2?`<span style="font-size:0.7rem;color:var(--muted)"> +${v.roles.length-2}</span>`:''}</td>
+      <td><span class="badge badge-cult">${v.avail}</span></td>
+      <td style="font-size:0.75rem;color:var(--muted)">${v.skills||'-'}</td>
+      <td class="mono">${new Date(v.timestamp).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</td>
+      <td><button class="btn btn-danger" style="padding:0.2rem 0.6rem;font-size:0.72rem" onclick="deleteEntry('volunteers','${v.id}')">🗑</button></td>
+    </tr>`).join('');
+}
+
+function renderSponTable(){
+  const spons=lsGet('sponsors')||[];
+  const tbody=document.getElementById('spon-table-body');
+  if(!spons.length){tbody.innerHTML=`<tr><td colspan="9"><div class="empty"><span class="e-icon">💼</span>No sponsor inquiries yet.</div></td></tr>`;return}
+  tbody.innerHTML=spons.slice().reverse().map(s=>`
+    <tr>
+      <td style="font-weight:700">${s.company}</td>
+      <td>${s.contact}</td>
+      <td style="font-size:0.78rem">${s.email}</td>
+      <td class="mono">${s.phone}</td>
+      <td><span class="badge badge-spon">${s.tier.split(' ')[0]}</span></td>
+      <td style="font-size:0.75rem;color:var(--muted)">${s.type}</td>
+      <td style="font-size:0.75rem;max-width:160px;color:var(--muted)">${s.message?s.message.substr(0,60)+'...':'-'}</td>
+      <td class="mono">${new Date(s.timestamp).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</td>
+      <td><button class="btn btn-danger" style="padding:0.2rem 0.6rem;font-size:0.72rem" onclick="deleteEntry('sponsors','${s.id}')">🗑</button></td>
+    </tr>`).join('');
+}
+
+function renderEventsBreakdown(){
+  const regs=lsGet('registrations')||[];
+  const eventCount={};
+  regs.forEach(r=>(r.events||[]).forEach(e=>{eventCount[e]=(eventCount[e]||0)+1}));
+  const sorted=Object.entries(eventCount).sort((a,b)=>b[1]-a[1]);
+  const max=sorted[0]?sorted[0][1]:1;
+  const el=document.getElementById('events-breakdown-content');
+  if(!sorted.length){el.innerHTML='<div class="empty"><span class="e-icon">📊</span>No event data yet.</div>';return}
+  el.innerHTML=sorted.map(([event,count])=>{
+    const pct=Math.round((count/max)*100);
+    const isTop=pct===100;
+    return `<div class="stat-widget" style="${isTop?'border-color:rgba(255,107,26,0.3)':''}">
+      <div style="font-size:1.3rem;font-weight:800;color:${isTop?'var(--orange)':'#fff'}">${count}</div>
+      <div style="font-size:0.82rem;font-weight:700;color:var(--text);margin-bottom:0.5rem">${event}</div>
+      <div style="height:5px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--orange),var(--pink));border-radius:3px"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ☁️ DELETE FROM SUPABASE
+async function deleteEntry(type,id){
+  if(!confirm('Delete this entry?'))return;
+
+  if (supabaseClient) {
+    const { error } = await supabaseClient.from(type).delete().eq('id', id);
+    if (error) { toast('Database error: ' + error.message, 'error'); return; }
+  }
+
+  const arr=(lsGet(type)||[]).filter(item=>item.id!==id);
+  lsSet(type,arr);
+  loadAdminDashboard();
+  toast('Entry deleted','warn');
+}
+
+function clearAllData(type){
+  if(!confirm(`Delete ALL ${type}? This cannot be undone.`))return;
+  // Note: For safety, this only clears local view. To clear Supabase, you must delete rows from the Supabase dashboard.
+  lsDel(type);loadAdminDashboard();toast(`All ${type} cleared locally`,'warn');
+}
+
+function nukeAllData(){
+  if(!confirm('⚠️ This will DELETE ALL local data. Are you absolutely sure?'))return;
+  ['registrations','volunteers','sponsors','budgets'].forEach(k=>lsDel(k));
+  loadAdminDashboard();updateHomeStats();toast('All local data deleted','error');
+}
+
+function filterTable(inputId,tbodyId){
+  const q=document.getElementById(inputId).value.toLowerCase();
+  document.querySelectorAll(`#${tbodyId} tr[data-search]`).forEach(row=>{
+    row.style.display=row.dataset.search.includes(q)?'':'none';
+  });
+}
+
+function switchAdminTab(id,btn){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tabs .tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function changePassword(){
+  const np=document.getElementById('new-pass').value;
+  const cp=document.getElementById('confirm-pass').value;
+  if(!np||np.length<6){toast('Password must be at least 6 characters','error');return}
+  if(np!==cp){toast('Passwords do not match','error');return}
+  lsSet('admin-password',np);
+  document.getElementById('new-pass').value='';document.getElementById('confirm-pass').value='';
+  toast('Password updated successfully 🔑','success');
+}
+
+function setRegStatus(status){
+  lsSet('reg-status',status);
+  updateHomeStats();
+  toast(`Registration status set to: ${status}`,'info');
+}
+
+function exportCSV(){
+  const regs=lsGet('registrations')||[];
+  const vols=lsGet('volunteers')||[];
+  const spons=lsGet('sponsors')||[];
+
+  function toCSV(data,fields){
+    const header=fields.join(',');
+    const rows=data.map(d=>fields.map(f=>{
+      const v=Array.isArray(d[f])?d[f].join('; '):(d[f]||'');
+      return `"${String(v).replace(/"/g,'""')}"`;
+    }).join(','));
+    return [header,...rows].join('\n');
+  }
+
+  const regCSV=toCSV(regs,['id','name','email','phone','college','dept','year','events','food','tshirt','source','timestamp']);
+  const volCSV=toCSV(vols,['id','name','email','phone','dept','year','tshirt','roles','avail','skills','timestamp']);
+  const sponCSV=toCSV(spons,['id','company','contact','email','phone','tier','type','message','timestamp']);
+
+  const all=`ARANYAK 2027 - FULL DATA EXPORT\nGenerated: ${new Date().toLocaleString('en-IN')}\n\n===REGISTRATIONS===\n${regCSV}\n\n===VOLUNTEERS===\n${volCSV}\n\n===SPONSORS===\n${sponCSV}`;
+  const blob=new Blob([all],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`aranyak2027-data-${Date.now()}.csv`;
+  a.click();URL.revokeObjectURL(url);
+  toast('CSV exported successfully 📥','success');
+}
+
+/* ═══════════════════════════════════════════
+   BUDGET PLANNER
+═══════════════════════════════════════════ */
 const BUDGET_ITEMS=[
   {key:'stage',icon:'🔊',title:'Stage & PA Sound System',sub:'2-day rental + setup',min:150000,max:250000,default:200000,color:'var(--orange)'},
   {key:'lighting',icon:'💡',title:'Lighting & Electrical',sub:'Stage lights + campus lighting',min:70000,max:120000,default:90000,color:'var(--gold)'},
@@ -1818,16 +2000,110 @@ function initBudget(){
   BUDGET_ITEMS.forEach(item=>{budgetVals[item.key]=item.default});
   renderBudgetItems(); renderBudgetBreakdown(); renderSavedBudgets();
 }
-function renderBudgetItems(){ /* Omitted for length, functionality preserved */ }
-function updateBudget(key,val){ /* Omitted for length, functionality preserved */ }
-function renderBudgetTotal(){ /* Omitted for length, functionality preserved */ }
-function renderBudgetBreakdown(){ /* Omitted for length, functionality preserved */ }
-function saveBudget(){ /* Omitted for length, functionality preserved */ }
-function renderSavedBudgets(){ /* Omitted for length, functionality preserved */ }
-function loadBudget(id){ /* Omitted for length, functionality preserved */ }
-function deleteBudget(id){ /* Omitted for length, functionality preserved */ }
-function resetBudget(){ /* Omitted for length, functionality preserved */ }
-function clearAllBudgets(){ /* Omitted for length, functionality preserved */ }
+function renderBudgetItems(){
+  const grid=document.getElementById('budget-items-grid');
+  grid.innerHTML=BUDGET_ITEMS.map(item=>{
+    const pct=Math.round(((budgetVals[item.key]-item.min)/(item.max-item.min))*100);
+    return `<div class="budget-item">
+      <div class="bi-header">
+        <span class="bi-icon">${item.icon}</span>
+        <div><div class="bi-title">${item.title}</div><div class="bi-sub">${item.sub}</div></div>
+      </div>
+      <div class="budget-slider-wrap">
+        <input class="budget-slider" type="range" min="${item.min}" max="${item.max}" value="${budgetVals[item.key]}"
+          step="500" data-key="${item.key}"
+          oninput="updateBudget('${item.key}',this.value)"
+          style="background:linear-gradient(90deg,${item.color} ${pct}%,rgba(255,255,255,0.08) ${pct}%)">
+        <span class="bi-amount" id="bi-amount-${item.key}">₹${Number(budgetVals[item.key]).toLocaleString('en-IN')}</span>
+      </div>
+      <div class="bi-range"><span>₹${Number(item.min).toLocaleString('en-IN')}</span><span>₹${Number(item.max).toLocaleString('en-IN')}</span></div>
+    </div>`;
+  }).join('');
+}
+function updateBudget(key,val){
+  budgetVals[key]=parseInt(val);
+  document.getElementById('bi-amount-'+key).textContent='₹'+parseInt(val).toLocaleString('en-IN');
+  const item=BUDGET_ITEMS.find(i=>i.key===key);
+  const pct=Math.round(((val-item.min)/(item.max-item.min))*100);
+  const slider=document.querySelector(`.budget-slider[data-key="${key}"]`);
+  if(slider)slider.style.background=`linear-gradient(90deg,${item.color} ${pct}%,rgba(255,255,255,0.08) ${pct}%)`;
+  renderBudgetTotal();
+  renderBudgetBreakdown();
+}
+function renderBudgetTotal(){
+  const total=Object.values(budgetVals).reduce((a,b)=>a+b,0);
+  const contingency=Math.round(total*0.1);
+  const grand=total+contingency;
+  document.getElementById('budget-total').textContent='₹'+grand.toLocaleString('en-IN');
+  const tags=document.getElementById('budget-status-tags');
+  const pct=((grand-100000)/80000)*100;
+  let status='',color='';
+  if(grand<100000){status='⬇️ Below minimum (₹1L)';color='var(--red)'}
+  else if(grand<=140000){status='✅ Conservative budget';color='var(--green)'}
+  else if(grand<=180000){status='🟡 Mid-range budget';color='var(--gold)'}
+  else{status='🔴 Above recommended range';color='var(--red)'}
+  tags.innerHTML=`
+    <span class="budget-tag" style="color:${color};border-color:${color}">${status}</span>
+    <span class="budget-tag" style="color:var(--muted)">+ ₹${contingency.toLocaleString('en-IN')} contingency (10%)</span>
+    <span class="budget-tag" style="color:var(--teal)">Base: ₹${total.toLocaleString('en-IN')}</span>`;
+}
+function renderBudgetBreakdown(){
+  const total=Object.values(budgetVals).reduce((a,b)=>a+b,0)||1;
+  const bd=document.getElementById('budget-breakdown');
+  bd.innerHTML=BUDGET_ITEMS.map(item=>{
+    const pct=Math.round((budgetVals[item.key]/total)*100);
+    return `<div class="breakdown-row">
+      <div class="bar-label">${item.icon} ${item.title}</div>
+      <div class="bar-track"><div class="bar-val" style="width:${pct}%;background:${item.color}"></div></div>
+      <div class="bar-amount">₹${Number(budgetVals[item.key]).toLocaleString('en-IN')}</div>
+    </div>`;
+  }).join('');
+  renderBudgetTotal();
+}
+function saveBudget(){
+  const label=document.getElementById('budget-label').value.trim()||'Budget Plan '+(new Date().toLocaleDateString('en-IN'));
+  const total=Object.values(budgetVals).reduce((a,b)=>a+b,0);
+  const plan={id:genId('BDG'),label,vals:{...budgetVals},total,contingency:Math.round(total*0.1),timestamp:new Date().toISOString()};
+  lsPush('budgets',plan);
+  document.getElementById('budget-label').value='';
+  renderSavedBudgets();
+  toast('Budget plan saved! 💾','success');
+}
+function renderSavedBudgets(){
+  const plans=lsGet('budgets')||[];
+  const el=document.getElementById('saved-budgets-list');
+  if(!plans.length){el.innerHTML='<div class="empty"><span class="e-icon">💾</span>No saved plans yet. Adjust the sliders and save your first plan!</div>';return}
+  el.innerHTML=plans.slice().reverse().map(p=>`
+    <div class="saved-budget-item">
+      <div>
+        <div style="font-weight:700;font-size:0.88rem">${p.label}</div>
+        <div style="font-size:0.72rem;color:var(--muted)">${new Date(p.timestamp).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} · Total: ₹${(p.total+p.contingency).toLocaleString('en-IN')} (incl. contingency)</div>
+      </div>
+      <div style="display:flex;gap:0.5rem">
+        <button class="btn btn-outline btn-sm" onclick="loadBudget('${p.id}')">📂 Load</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBudget('${p.id}')">🗑</button>
+      </div>
+    </div>`).join('');
+}
+function loadBudget(id){
+  const plans=lsGet('budgets')||[];
+  const plan=plans.find(p=>p.id===id);
+  if(!plan)return;
+  budgetVals={...plan.vals};
+  renderBudgetItems(); renderBudgetBreakdown(); toast(`Loaded: "${plan.label}"`, 'info');
+}
+function deleteBudget(id){
+  const plans=(lsGet('budgets')||[]).filter(p=>p.id!==id);
+  lsSet('budgets',plans);renderSavedBudgets();toast('Budget plan deleted','info');
+}
+function resetBudget(){
+  BUDGET_ITEMS.forEach(item=>{budgetVals[item.key]=item.default});
+  renderBudgetItems();renderBudgetBreakdown();toast('Budget reset to defaults','info');
+}
+function clearAllBudgets(){
+  if(!confirm('Delete all saved budget plans?'))return;
+  lsDel('budgets');renderSavedBudgets();toast('All saved plans cleared','warn');
+}
 
 /* ═══════════════════════════════════════════
    INIT
